@@ -1,0 +1,14 @@
+# Secret: webhook URL + shared secret. Never commit.
+kobo-sync.env
+
+# Local run log
+sync.log
+
+# Built locally by install.sh (regenerating avoids Gatekeeper quarantine)
+KoboSync.app/
+
+# Scratch / OS
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.DS_Store
