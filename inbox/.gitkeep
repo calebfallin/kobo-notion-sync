@@ -1,0 +1,4 @@
+# Drop ebooks (EPUB, PDF, CBZ/CBR, TXT, …) in this folder.
+# The next sync copies them onto the plugged-in Kobo, then moves the
+# originals into ./sent/. Plain EPUBs are auto-converted to KEPUB when
+# `kepubify` is installed. The files themselves are git-ignored.

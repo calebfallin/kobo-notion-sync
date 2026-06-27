@@ -1,0 +1,9 @@
+# Timestamped copies of the Kobo's KoboReader.sqlite land here on every sync —
+# the only copy of your highlights + reading positions. The .sqlite files are
+# git-ignored (personal data); only this placeholder is tracked.
+#
+# Restore: with the Kobo plugged in, copy a backup back over the device DB —
+#   cp backups/KoboReader-<stamp>.sqlite "/Volumes/KOBOeReader/.kobo/KoboReader.sqlite"
+#   rm -f "/Volumes/KOBOeReader/.kobo/KoboReader.sqlite-wal" \
+#         "/Volumes/KOBOeReader/.kobo/KoboReader.sqlite-shm"
+# then eject. (Close any reading session / fully sync the Kobo first.)

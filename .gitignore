@@ -7,7 +7,11 @@ sync.log
 # Built locally by install.sh (regenerating avoids Gatekeeper quarantine)
 KoboSync.app/
 
-# Scratch / OS
+# Sideload staging — books you drop here aren't committed
+inbox/*
+!inbox/.gitkeep
+
+# DB backups + scratch (personal reading data — never commit the .sqlite files)
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
