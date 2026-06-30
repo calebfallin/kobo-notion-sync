@@ -133,6 +133,10 @@ SELECT
   SeriesNumber   AS seriesNumber
 FROM content
 WHERE ContentType = 6
+  -- Only books actually downloaded to the device. Skips Kobo store
+  -- recommendations/previews (IsDownloaded='false'), which otherwise leak
+  -- into Notion as phantom book pages you never opened.
+  AND IsDownloaded = 'true'
 ORDER BY Title;
 EOF
 
