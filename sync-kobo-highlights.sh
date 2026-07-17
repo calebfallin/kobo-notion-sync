@@ -44,6 +44,9 @@ fi
 
 WEBHOOK_URL="${KOBO_WEBHOOK_URL:-}"
 WEBHOOK_SECRET="${KOBO_SYNC_SECRET:-}"
+# Notion Workers rejects oversized webhook bodies before invoking the handler.
+# Gzip only large book payloads; the worker decodes them with a strict size cap.
+WEBHOOK_COMPRESS_THRESHOLD_BYTES="${KOBO_WEBHOOK_COMPRESS_THRESHOLD_BYTES:-48000}"
 
 fail() { echo "error: $*" >&2; exit 1; }
 
@@ -84,8 +87,12 @@ fi
 command -v sqlite3 >/dev/null 2>&1 || fail "sqlite3 not found"
 command -v jq >/dev/null 2>&1 || fail "jq not found (install with: brew install jq)"
 command -v curl >/dev/null 2>&1 || fail "curl not found"
+command -v gzip >/dev/null 2>&1 || fail "gzip not found"
+command -v base64 >/dev/null 2>&1 || fail "base64 not found"
 [ -n "$WEBHOOK_URL" ] || fail "KOBO_WEBHOOK_URL is not set (see kobo-sync.env)"
 [ -n "$WEBHOOK_SECRET" ] || fail "KOBO_SYNC_SECRET is not set (see kobo-sync.env)"
+[[ "$WEBHOOK_COMPRESS_THRESHOLD_BYTES" =~ ^[0-9]+$ ]] \
+	|| fail "KOBO_WEBHOOK_COMPRESS_THRESHOLD_BYTES must be a whole number of bytes"
 
 echo "Kobo found at $KOBO_MOUNT"
 
@@ -318,7 +325,14 @@ ok=0; failed=0
 while IFS= read -r book; do
 	btitle="$(printf '%s' "$book" | jq -r '.title')"
 	n="$(printf '%s' "$book" | jq '.highlights | length')"
-	code="$(printf '%s' "$book" | curl -s -o /dev/null -w '%{http_code}' \
+	payload="$book"
+	payload_bytes="$(printf '%s' "$book" | wc -c | tr -d '[:space:]')"
+	if [ "$payload_bytes" -gt "$WEBHOOK_COMPRESS_THRESHOLD_BYTES" ]; then
+		compressed="$(printf '%s' "$book" | gzip -c | base64 | tr -d '\n')"
+		payload="$(jq -nc --arg payload "$compressed" '{encoding: "gzip-base64", payload: $payload}')"
+		echo "  ↳ ${btitle}: compressed ${payload_bytes} byte webhook payload"
+	fi
+	code="$(printf '%s' "$payload" | curl -s -o /dev/null -w '%{http_code}' \
 		--max-time 120 \
 		-X POST "$WEBHOOK_URL" \
 		-H "Content-Type: application/json" \
