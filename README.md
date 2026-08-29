@@ -78,7 +78,7 @@ run, not just when a book is sideloaded — see *Daily use*.)
    ```sh
    brew install jq
    ```
-2. **Clone this repo** anywhere, e.g. `~/dev/kobo-notion-sync`.
+2. **Clone this repo** anywhere, e.g. `~/agents/personal/dev/kobo-notion-sync`.
 3. **Create your config** from the template and fill it in:
    ```sh
    cp kobo-sync.env.example kobo-sync.env
