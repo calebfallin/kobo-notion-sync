@@ -89,6 +89,8 @@ command -v jq >/dev/null 2>&1 || fail "jq not found (install with: brew install 
 command -v curl >/dev/null 2>&1 || fail "curl not found"
 command -v gzip >/dev/null 2>&1 || fail "gzip not found"
 command -v base64 >/dev/null 2>&1 || fail "base64 not found"
+command -v shasum >/dev/null 2>&1 || fail "shasum not found"
+command -v unzip >/dev/null 2>&1 || fail "unzip not found"
 [ -n "$WEBHOOK_URL" ] || fail "KOBO_WEBHOOK_URL is not set (see kobo-sync.env)"
 [ -n "$WEBHOOK_SECRET" ] || fail "KOBO_SYNC_SECRET is not set (see kobo-sync.env)"
 [[ "$WEBHOOK_COMPRESS_THRESHOLD_BYTES" =~ ^[0-9]+$ ]] \
@@ -200,73 +202,8 @@ KOBO_NATIVE_EXTS="epub pdf cbz cbr txt html htm rtf fb2 djvu"
 SIDELOAD_COPIED=0
 SIDELOAD_FAILED=0
 
-sideload_books() {
-	SIDELOAD_COPIED=0
-	SIDELOAD_FAILED=0
-	[ -d "$INBOX_DIR" ] || return 0
-
-	# Top-level files only — skip the sent/ archive, subdirs, and dotfiles.
-	shopt -s nullglob
-	local entries=("$INBOX_DIR"/*)
-	shopt -u nullglob
-	local candidates=() f
-	for f in "${entries[@]}"; do
-		[ -f "$f" ] && candidates+=("$f")
-	done
-	[ "${#candidates[@]}" -gt 0 ] || return 0
-
-	echo "Sideloading ${#candidates[@]} file(s) from inbox/ …"
-	mkdir -p "$SENT_DIR"
-	local have_kepubify=0
-	command -v kepubify >/dev/null 2>&1 && have_kepubify=1
-
-	local base lower ext
-	for f in "${candidates[@]}"; do
-		base="$(basename "$f")"
-		lower="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
-		ext="${lower##*.}"
-
-		# Already a KEPUB → copy as-is.
-		case "$lower" in
-		*.kepub.epub)
-			if cp "$f" "$KOBO_MOUNT/$base"; then
-				mv "$f" "$SENT_DIR/"; echo "  ✓ $base (kepub)"; SIDELOAD_COPIED=$((SIDELOAD_COPIED + 1))
-			else
-				echo "  ✗ $base — copy failed"; SIDELOAD_FAILED=$((SIDELOAD_FAILED + 1))
-			fi
-			continue
-			;;
-		esac
-
-		# Plain EPUB → convert to KEPUB when we can, else copy as-is.
-		if [ "$ext" = "epub" ] && [ "$have_kepubify" = "1" ]; then
-			# -o <existing dir> writes "<name>.kepub.epub" there; -i drops the
-			# "_converted" suffix (safe: output dir differs from inbox/).
-			if kepubify -i -o "$KOBO_MOUNT" "$f" >/dev/null 2>&1; then
-				mv "$f" "$SENT_DIR/"; echo "  ✓ $base → kepub"; SIDELOAD_COPIED=$((SIDELOAD_COPIED + 1))
-			else
-				echo "  ✗ $base — kepubify failed (left in inbox/)"; SIDELOAD_FAILED=$((SIDELOAD_FAILED + 1))
-			fi
-			continue
-		fi
-
-		# Other natively-readable formats (incl. plain EPUB with no kepubify) → copy.
-		if printf '%s\n' $KOBO_NATIVE_EXTS | grep -qx "$ext"; then
-			if cp "$f" "$KOBO_MOUNT/$base"; then
-				mv "$f" "$SENT_DIR/"; echo "  ✓ $base"; SIDELOAD_COPIED=$((SIDELOAD_COPIED + 1))
-			else
-				echo "  ✗ $base — copy failed"; SIDELOAD_FAILED=$((SIDELOAD_FAILED + 1))
-			fi
-			continue
-		fi
-
-		# Unsupported (mobi/azw/azw3/kfx/…): the Kobo can't read these.
-		echo "  ⤬ $base — .$ext isn't read by Kobo; convert to EPUB first (left in inbox/)"
-		SIDELOAD_FAILED=$((SIDELOAD_FAILED + 1))
-	done
-
-	echo "Sideload: $SIDELOAD_COPIED copied, $SIDELOAD_FAILED skipped/failed."
-}
+# shellcheck source=sideload-books.sh
+. "$SCRIPT_DIR/sideload-books.sh"
 
 notify() {
 	# notify <title> <message> — best-effort macOS banner; never fails the run.
@@ -315,7 +252,8 @@ if [ "$COUNT" = "0" ]; then
 	echo "No books found on the Kobo. Nothing to sync to Notion."
 	sideload_books
 	finish_and_notify 0 0
-	exit 0
+	if [ "${SIDELOAD_FAILED:-0}" = "0" ]; then exit 0; fi
+	exit 1
 fi
 HLBOOKS="$(printf '%s' "$BOOKS" | jq '[.[] | select(.highlights | length > 0)] | length')"
 echo "Found $COUNT book(s), $HLBOOKS with highlights. Syncing to Notion…"

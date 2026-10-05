@@ -52,7 +52,7 @@ cp ~/Downloads/some-book.epub inbox/    # then run ./sync-kobo-highlights.sh
 
 | You drop… | What happens |
 |---|---|
-| `.epub` | Converted to **KEPUB** if `kepubify` is installed (better progress/stats — the same data this sync reads), else copied as-is |
+| `.epub` | Converted to **KEPUB** if `kepubify` is installed; a valid EPUB copies in its original format if conversion fails or the converter is absent |
 | `.kepub.epub` | Copied as-is |
 | `.pdf` `.cbz` `.cbr` `.txt` `.html` `.rtf` `.fb2` `.djvu` | Copied as-is (Kobo reads these natively) |
 | `.mobi` `.azw` `.azw3` `.kfx` (Kindle) | **Skipped** and left in `inbox/` — Kobo can't read them; convert to EPUB first |
@@ -68,7 +68,15 @@ which gives accurate page numbers and reading-time stats. Without it, EPUBs stil
 copy over fine.
 
 **Notes:** the Kobo reads title/author/cover from the file's own metadata, so
-filenames don't matter. Files in `inbox/` are git-ignored — they won't be
+filenames don't matter. Drop downloads into `inbox/` without renaming them.
+Conversion uses a short temporary filename. Long or unsafe device names are
+shortened automatically, with a content hash to keep names distinct. Original
+download names remain in `inbox/sent/`; repeated archive names use a separate
+batch folder. Existing books are preserved, and copies use a temporary file so
+an incomplete transfer does not appear as a book. Broken EPUB archives remain
+in `inbox/` with an error. Conversion errors are shown before EPUB fallback.
+
+Files in `inbox/` are git-ignored — they won't be
 committed. (Ejection + the completion notification happen at the end of *every*
 run, not just when a book is sideloaded — see *Daily use*.)
 
@@ -199,6 +207,7 @@ rm -f "/Volumes/KOBOeReader/.kobo/KoboReader.sqlite-wal" \
 | File | Purpose |
 |---|---|
 | `sync-kobo-highlights.sh` | the bridge — reads the Kobo + POSTs to the webhook, then sideloads `inbox/` onto the device |
+| `sideload-books.sh` | safe filenames, conversion, copying, and archiving; sourced by the sync script |
 | `inbox/` | drop ebooks here to sideload them; originals move to `inbox/sent/` (contents git-ignored) |
 | `backups/` | timestamped `KoboReader.sqlite` copies, one per sync (`.sqlite` files git-ignored) |
 | `sync-kobo-to-notion.sh` | Raycast command wrapper (the **Sync Kobo to Notion** command) |
@@ -207,3 +216,13 @@ rm -f "/Volumes/KOBOeReader/.kobo/KoboReader.sqlite-wal" \
 | `kobo-sync.env` | your real config (git-ignored) |
 | `KoboSync.app` | FDA wrapper, built locally by `install.sh` (git-ignored) |
 | `sync.log` | run log (git-ignored) |
+
+## Local validation
+
+These checks use temporary folders and test books. They do not run the live
+sync, access a connected Kobo, read the environment file, or send data to Notion.
+
+```sh
+bash -n sync-kobo-highlights.sh sideload-books.sh
+python3 tests/test_sideload.py
+```
