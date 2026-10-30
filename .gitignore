@@ -16,3 +16,6 @@ inbox/*
 *.sqlite-wal
 *.sqlite-shm
 .DS_Store
+
+# Python migration tool caches
+__pycache__/

@@ -226,3 +226,91 @@ sync, access a connected Kobo, read the environment file, or send data to Notion
 bash -n sync-kobo-highlights.sh sideload-books.sh
 python3 tests/test_sideload.py
 ```
+
+## Migrate old Kobo highlights to Readest
+
+`migrate-kobo-highlights.py` makes a Readest annotations import file from a
+**Kobo database snapshot and the exact KEPUB file that was read on the device**.
+It does not change either input, contact a service, or run the existing sync.
+
+Use one book for the first test. Back up the Kobo database and the book first.
+Find the book's exact `ContentID` in the snapshot's `content` table. Then run:
+
+```sh
+python3 migrate-kobo-highlights.py \
+  --database backups/KoboReader-example.sqlite \
+  --book 'inbox/Example.kepub.epub' \
+  --volume-id 'file:///mnt/onboard/Example.kepub.epub' \
+  --output 'inbox/Example-readest-annotations.json'
+```
+
+The tool maps each Kobo span and text offset to an EPUB CFI range. It checks
+that the range contains the saved highlight text. If an anchor is absent or
+the text differs, it stops without creating an export. It preserves note IDs,
+note text, and dates. It excludes hidden highlights and dog-ear bookmarks.
+An existing output file is never overwritten. Keep the output in an ignored
+private directory, such as `inbox/`.
+
+Import the **same unchanged book file** into Readest. In that book, select
+**Book Menu → Import Annotations → Readest**, then select the generated JSON.
+Check the count and a sample of highlights in the reader. Re-export the
+annotations to make a backup after the import.
+
+This is a one-time migration tool. It does not replace the daily Notion sync.
+The existing shell script reads Kobo's native database, not KOReader's
+highlights. Its Worker also owns the book's full page body. Do not direct that
+writer and a new Readest writer at the same page until ownership is changed.
+
+For the device pilot, use the official Readest KOReader plugin, sign in with
+the same Readest account on both devices, and test manual progress sync before
+enabling **Auto sync**. Test a new highlight and reading position in each
+direction. Close the book and allow the online sync to finish before switching
+devices. A successful progress test does not prove highlight sync works.
+
+Sources: [Readest sync guide](https://readest.com/docs/sync) and
+[Readest annotation format](https://github.com/readest/readest/blob/v0.12.16/apps/readest-app/src/services/annotation/providers/readest.ts).
+
+Run the migration checks without a device or account:
+
+```sh
+python3 -B tests/test_kobo_migration.py
+```
+
+### Readest plugin date fix
+
+The official Readest KOReader plugin `v0.12.16-1` parses incoming UTC dates
+with `os.time()`, which interprets them in the device's local time zone.
+In a non-UTC zone this changes annotation dates. Re-uploaded dates can then
+put Readest's incremental sync cursor in the future.
+
+`readest_utc.lua` converts these dates without the device time zone.
+`patch-readest-timezone.py` replaces only that parser. It checks the exact
+source checksum and keeps the original file as
+`readest_syncannotations.lua.before-utc-fix`. It does not access account
+credentials or change books, highlights, reading positions, or settings.
+
+With KOReader closed and the Kobo connected in USB mode, check the patch:
+
+```sh
+python3 patch-readest-timezone.py \
+  --plugin-dir '/Volumes/KOBOeReader/.adds/koreader/plugins/readest.koplugin' \
+  --expected-sha256 9ec3f4baae83fad8da123cb69bed135f3582c9fb855b555d0ba21ec8a08a98e1
+```
+
+Add `--apply` to install it. Safely eject the Kobo, then restart KOReader.
+To undo it, close KOReader and restore the `.before-utc-fix` file over the
+patched parser. Keep the backup until device tests pass. A future plugin
+update can replace this patch; do not apply it to a different source hash.
+
+This fix prevents new date conversion errors. It does **not** repair dates
+already changed in the cloud, reset Readest's existing sync cursors, or prove
+that a missing highlight uploaded. Verify the cloud record and the other
+device separately. The reading-position code is unchanged.
+
+Run the date and installer checks locally (Lua is required):
+
+```sh
+python3 -B tests/test_readest_utc.py
+python3 -B tests/test_readest_patch.py
+luac -p readest_utc.lua
+```
