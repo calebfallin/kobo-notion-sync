@@ -19,3 +19,4 @@ inbox/*
 
 # Python migration tool caches
 __pycache__/
+readest-owned-volumes.json

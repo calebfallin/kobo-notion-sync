@@ -96,6 +96,20 @@ command -v unzip >/dev/null 2>&1 || fail "unzip not found"
 [[ "$WEBHOOK_COMPRESS_THRESHOLD_BYTES" =~ ^[0-9]+$ ]] \
 	|| fail "KOBO_WEBHOOK_COMPRESS_THRESHOLD_BYTES must be a whole number of bytes"
 
+# Migrated books must not be sent to the old full-page Notion writer.
+# A supplied but missing/invalid ownership file stops the run before any POST.
+READEST_OWNERSHIP_FILE="${KOBO_READEST_OWNERSHIP_FILE:-$SCRIPT_DIR/readest-owned-volumes.json}"
+READEST_OWNED_VOLUMES='[]'
+if [ -e "$READEST_OWNERSHIP_FILE" ] || [ -n "${KOBO_READEST_OWNERSHIP_FILE:-}" ]; then
+	[ -f "$READEST_OWNERSHIP_FILE" ] && [ -r "$READEST_OWNERSHIP_FILE" ] \
+		|| fail "Readest ownership file is missing or unreadable"
+	READEST_OWNED_VOLUMES="$(jq -ce '
+		if type == "array" and all(.[]; type == "string" and length > 0)
+		then . else error("Invalid ownership file") end
+	' "$READEST_OWNERSHIP_FILE" 2>/dev/null)" \
+		|| fail "Readest ownership file must contain a JSON array of nonempty Kobo volume IDs"
+fi
+
 echo "Kobo found at $KOBO_MOUNT"
 
 # ---- snapshot the database (incl. WAL) so we never read the live file --------
@@ -184,6 +198,15 @@ BOOKS="$(jq -nc --argjson books "$BOOKS_RAW" --argjson hls "$HL_RAW" '
 			}))
 	})')"
 
+NATIVE_COUNT="$(printf '%s' "$BOOKS" | jq 'length')"
+BOOKS="$(printf '%s' "$BOOKS" | jq --argjson owned "$READEST_OWNED_VOLUMES" \
+	-f "$SCRIPT_DIR/filter-native-books.jq")"
+ELIGIBLE_COUNT="$(printf '%s' "$BOOKS" | jq 'length')"
+READEST_SKIPPED=$((NATIVE_COUNT - ELIGIBLE_COUNT))
+if [ "$READEST_SKIPPED" -gt 0 ]; then
+	echo "Skipping $READEST_SKIPPED book(s) whose Notion highlights are managed by Readest."
+fi
+
 # ---- sideload: copy new books from inbox/ onto the Kobo ---------------------
 # Drop ebooks into ./inbox and they get copied onto the device on the next sync,
 # then archived to ./inbox/sent. Plain EPUBs are converted to Kobo's enhanced
@@ -249,7 +272,7 @@ finish_and_notify() {
 
 COUNT="$(printf '%s' "$BOOKS" | jq 'length')"
 if [ "$COUNT" = "0" ]; then
-	echo "No books found on the Kobo. Nothing to sync to Notion."
+	echo "No eligible native Kobo books. Nothing to sync to Notion."
 	sideload_books
 	finish_and_notify 0 0
 	if [ "${SIDELOAD_FAILED:-0}" = "0" ]; then exit 0; fi
