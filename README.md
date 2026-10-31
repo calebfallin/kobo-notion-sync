@@ -229,6 +229,40 @@ python3 tests/test_sideload.py
 
 ## Migrate old Kobo highlights to Readest
 
+### Daily use after migration
+
+1. Download the ebook on the Mac. In Readest, use **Import Books** and upload
+   it to Readest Cloud. Keep the file unchanged across devices.
+2. On the iPhone, open the book from the Readest library. On the Kobo, use
+   **Tools → Readest → Readest library** and open the same book. The first open can
+   require a download. Keep Wi-Fi on for the initial download and sync.
+3. Read in KOReader on the Kobo and Readest on the phone. Close the book and
+   let sync finish before switching devices. The device tests must cover a
+   reading position and a saved highlight in both directions.
+4. To update Notion, open that book in the Readest app or browser where the
+   Notion connection is configured. It syncs the book's highlights after
+   loading them and after changes. **Book Menu → Notion Sync → Push Notes**
+   runs the same sync manually. A second run should not create duplicates.
+
+Notion sync runs in the configured Readest client. It is not a scheduled
+cloud job while all Readest clients are closed. Do not assume another device
+has the Notion connection until its settings show it as connected.
+
+Use the existing Notion Books database. Before the first sync of an existing
+book page, make the Readest title match that page's title and add a paragraph
+link to `https://readest.com/notion-sync/book/BOOK_HASH` on that page. Readest
+uses the title and marker to reuse the page. This avoids creating a second
+page and preserves manual content. Its note links identify the managed
+highlight blocks for later updates.
+
+The native Readest integration maintains highlight content. It does not
+maintain the old script's numeric Highlights, Progress, Status, or Last Synced
+properties. Keep these separate from device progress sync. For a new book,
+set **Has notes** once if the existing Highlights & Notes view uses that flag
+to show pages. Use **All books** to find a page before setting the flag.
+
+### Convert the original highlights
+
 `migrate-kobo-highlights.py` makes a Readest annotations import file from a
 **Kobo database snapshot and the exact KEPUB file that was read on the device**.
 It does not change either input, contact a service, or run the existing sync.
