@@ -226,3 +226,149 @@ sync, access a connected Kobo, read the environment file, or send data to Notion
 bash -n sync-kobo-highlights.sh sideload-books.sh
 python3 tests/test_sideload.py
 ```
+
+## Migrate old Kobo highlights to Readest
+
+### Daily use after migration
+
+1. Download the ebook on the Mac. In Readest, use **Import Books** and upload
+   it to Readest Cloud. Keep the file unchanged across devices.
+2. On the iPhone, open the book from the Readest library. On the Kobo, use
+   **Tools → Readest → Readest library** and open the same book. The first open can
+   require a download. Keep Wi-Fi on for the initial download and sync.
+3. Read in KOReader on the Kobo and Readest on the phone. Close the book and
+   let sync finish before switching devices. The device tests must cover a
+   reading position and a saved highlight in both directions.
+4. To update Notion, open that book in the Readest app or browser where the
+   Notion connection is configured. It syncs the book's highlights after
+   loading them and after changes. **Book Menu → Notion Sync → Push Notes**
+   runs the same sync manually. A second run should not create duplicates.
+
+Notion sync runs in the configured Readest client. It is not a scheduled
+cloud job while all Readest clients are closed. Do not assume another device
+has the Notion connection until its settings show it as connected.
+
+Use the existing Notion Books database. Before the first sync of an existing
+book page, make the Readest title match that page's title and add a paragraph
+link to `https://readest.com/notion-sync/book/BOOK_HASH` on that page. Readest
+uses the title and marker to reuse the page. This avoids creating a second
+page and preserves manual content. Its note links identify the managed
+highlight blocks for later updates.
+
+The native Readest integration maintains highlight content. It does not
+maintain the old script's numeric Highlights, Progress, Status, or Last Synced
+properties. Keep these separate from device progress sync. For a new book,
+set **Has notes** once if the existing Highlights & Notes view uses that flag
+to show pages. Use **All books** to find a page before setting the flag.
+
+### Convert the original highlights
+
+`migrate-kobo-highlights.py` makes a Readest annotations import file from a
+**Kobo database snapshot and the exact KEPUB file that was read on the device**.
+It does not change either input, contact a service, or run the existing sync.
+
+Use one book for the first test. Back up the Kobo database and the book first.
+Find the book's exact `ContentID` in the snapshot's `content` table. Then run:
+
+```sh
+python3 migrate-kobo-highlights.py \
+  --database backups/KoboReader-example.sqlite \
+  --book 'inbox/Example.kepub.epub' \
+  --volume-id 'file:///mnt/onboard/Example.kepub.epub' \
+  --output 'inbox/Example-readest-annotations.json'
+```
+
+The tool maps each Kobo span and text offset to an EPUB CFI range. It checks
+that the range contains the saved highlight text. If an anchor is absent or
+the text differs, it stops without creating an export. It preserves note IDs,
+note text, and dates. It excludes hidden highlights and dog-ear bookmarks.
+An existing output file is never overwritten. Keep the output in an ignored
+private directory, such as `inbox/`.
+
+Import the **same unchanged book file** into Readest. In that book, select
+**Book Menu → Import Annotations → Readest**, then select the generated JSON.
+Check the count and a sample of highlights in the reader. Re-export the
+annotations to make a backup after the import.
+
+This is a one-time migration tool. It does not replace the daily Notion sync.
+The existing shell script reads Kobo's native database, not KOReader's
+highlights. Its Worker also owns the book's full page body. Do not direct that
+writer and a new Readest writer at the same page until ownership is changed.
+
+Before a migrated book starts sending highlights to Notion through Readest,
+add its exact native Kobo `ContentID` to `readest-owned-volumes.json` beside
+the shell script. This private file is ignored by Git:
+
+```json
+["file:///mnt/onboard/Example.kepub.epub"]
+```
+
+The USB sync then skips that book before it sends any book data to Notion.
+It still backs up the native Kobo database and can sync the remaining native
+books. Titles are not used for exclusion. A different book with the same title
+is not skipped. Keep new Readest books out of the old USB sideload inbox; import
+the unchanged file into Readest and download it from the same cloud library on
+each device.
+
+For a required ownership file, set `KOBO_READEST_OWNERSHIP_FILE` to its absolute
+path in `kobo-sync.env`. A missing, unreadable, or invalid required file stops
+the run before any Notion request. Without a configured or default file, the
+legacy behavior is unchanged. The filter must be deployed with the updated
+shell script before using the ownership file; copying the file alone does not
+protect a page when an older script runs.
+
+For the device pilot, use the official Readest KOReader plugin, sign in with
+the same Readest account on both devices, and test manual progress sync before
+enabling **Auto sync**. Test a new highlight and reading position in each
+direction. Close the book and allow the online sync to finish before switching
+devices. A successful progress test does not prove highlight sync works.
+
+Sources: [Readest sync guide](https://readest.com/docs/sync) and
+[Readest annotation format](https://github.com/readest/readest/blob/v0.12.16/apps/readest-app/src/services/annotation/providers/readest.ts).
+
+Run the migration checks without a device or account:
+
+```sh
+python3 -B tests/test_kobo_migration.py
+```
+
+### Readest plugin date fix
+
+The official Readest KOReader plugin `v0.12.16-1` parses incoming UTC dates
+with `os.time()`, which interprets them in the device's local time zone.
+In a non-UTC zone this changes annotation dates. Re-uploaded dates can then
+put Readest's incremental sync cursor in the future.
+
+`readest_utc.lua` converts these dates without the device time zone.
+`patch-readest-timezone.py` replaces only that parser. It checks the exact
+source checksum and keeps the original file as
+`readest_syncannotations.lua.before-utc-fix`. It does not access account
+credentials or change books, highlights, reading positions, or settings.
+
+With KOReader closed and the Kobo connected in USB mode, check the patch:
+
+```sh
+python3 patch-readest-timezone.py \
+  --plugin-dir '/Volumes/KOBOeReader/.adds/koreader/plugins/readest.koplugin' \
+  --expected-sha256 9ec3f4baae83fad8da123cb69bed135f3582c9fb855b555d0ba21ec8a08a98e1
+```
+
+Add `--apply` to install it. Safely eject the Kobo, then restart KOReader.
+To undo it, close KOReader and restore the `.before-utc-fix` file over the
+patched parser. Keep the backup until device tests pass. A future plugin
+update can replace this patch; do not apply it to a different source hash.
+
+This fix prevents new date conversion errors. It does **not** repair dates
+already changed in the cloud, reset Readest's existing sync cursors, or prove
+that a missing highlight uploaded. Verify the cloud record and the other
+device separately. The reading-position code is unchanged.
+
+Run the date and installer checks locally (Lua is required):
+
+```sh
+python3 -B tests/test_readest_utc.py
+python3 -B tests/test_readest_patch.py
+python3 -B tests/test_readest_ownership.py
+bash -n sync-kobo-highlights.sh
+luac -p readest_utc.lua
+```
